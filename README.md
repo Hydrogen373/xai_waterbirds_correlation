@@ -1,44 +1,70 @@
-# Waterbirds VGG11 shortcut experiment
+# Waterbirds correlation experiment
 
-Train VGG11 from random initialization for 50 epochs and track classification,
-linear readability of bird/background labels, and Grad-CAM over time.
+Train three VGG11 classifiers from random initialization for 50 epochs each.
+The training and validation images have bird/background correlations of
+`0.95`, `0.80`, and `0.65`; every model is evaluated against the same official
+Waterbirds test split, whose correlation is approximately `0.5`.
 
-## Run
+## Data and run
 
-Install the packages in `requirements.txt`, then run:
+The experiment needs the original CUB-200-2011 images, segmentation masks,
+`images.txt`, and `train_test_split.txt`, plus Places365 `data_256` images in
+`b/bamboo_forest`, `f/forest/broadleaf`, `o/ocean`, and `l/lake/natural`.
+The defaults point to the locally available sibling project. Override them
+when running elsewhere:
 
 ```powershell
-python experiment.py --output-dir runs/vgg11_scratch
+python -m pip install -r requirements.txt
+python experiment.py --cub-root C:\path\to\CUB_200_2011 --places-root C:\path\to\places365 --output-dir runs/vgg11_correlations
 ```
 
-The default is 50 epochs, batch size 32, and seed 42. A CUDA GPU is selected
-automatically when available. The complete VGG11 is large; reduce `--batch-size`
-if GPU memory is insufficient. Weight snapshots every five epochs use roughly
-6 GB of disk in total. `--epochs 1` can be used for a smoke run.
+`--epochs` defaults to 50, `--batch-size` to 32, and `--seed` to 42. CUDA is
+selected automatically when available. Use `--resume` with the same settings
+and output directory after an interrupted run. The complete VGG11 is large;
+reduce `--batch-size` if GPU memory is insufficient. The script downloads the
+official `grodino/waterbirds` test split through Hugging Face Datasets.
 
-The script downloads `grodino/waterbirds` through Hugging Face Datasets. It
-stratifies the official train split by `(label, place)` into 80% training and
-20% validation. The official test split is read only after training. Input
-images are resized to 256 pixels on the short side, center-cropped to 224,
-normalized from `[0, 1]` to `[-1, 1]`, and horizontally flipped only during
-training. No pretrained weights or ImageNet normalization statistics are used.
+The 5,994 bird images in the original CUB training partition are split once,
+stratified by bird label, into 4,795 train and 1,199 validation bird images.
+All three conditions use these same bird identities and the same number of
+examples. A single fixed land background and water background are assigned
+to each bird; the correlation condition selects which is composited. The
+background image pools for train and validation are disjoint. Each condition
+sets the aligned fraction separately within landbirds and waterbirds, rounded
+to a whole number of images. This preserves the original class proportions.
+The official test birds come from the separate original CUB test partition.
 
-## Outputs
+## Metrics and outputs
 
-`epoch_metrics.csv` contains per-epoch overall and four-group accuracies,
-worst-group accuracy, aligned/conflicting accuracy and their difference, plus
-linear-probe accuracy for `label` and `place`. Probe fitting uses the model's
-last hidden activation, with equal training weight for each of the four groups.
-The fixed ten-image Grad-CAM sample is saved at epoch 0 and every five epochs.
-`epoch_curves.png`, `gradcam_timeline.png`, checkpoints, split indices, settings,
-and final `test_metrics.json` are written to the output directory. The output
-directory must be empty before starting a run. `gradcam_changes.csv` records
-the mean absolute pixel difference between each normalized heatmap and its
-previous five-epoch heatmap; it measures spatial change, not attribution strength.
+Each condition directory (`corr095`, `corr080`, `corr065`) contains one
+`epoch_metrics.csv` row per epoch, a `final.pt` model, a resumable `latest.pt`,
+and three GradCAM thumbnails per epoch. `validation_accuracy` is ordinary
+accuracy on the condition-matched validation split. `test_accuracy` is
+ordinary accuracy on the common official test split. Worst-group accuracies
+are also recorded.
 
-High `place` probe accuracy means the representation contains readable
-background information; it does not prove that the classifier uses that
-information for its decisions. Read it alongside conflicting-group accuracy
-and the qualitative Grad-CAM panels. The train-derived validation split retains
-the dataset's strong correlation between bird type and background, so minority
-group sample counts are included in every evaluation row.
+The bird and background linear probes use the classifier's last hidden
+activation. They are fitted on the condition's training images using equal
+weight for each of the four `(bird, background)` groups. Their reported
+accuracy is the average of the four group accuracies on the official test
+images. A high background probe score indicates that the representation
+contains background information; it does not alone establish that the
+classifier relies on it.
+
+At the top level, `epoch_metrics.csv` combines all 150 metric rows and
+`epoch_curves.png` shows four metrics for all three conditions.
+`gradcam_grid.png` has epochs as 50 rows and correlation/sample
+combinations as nine columns. Samples a, b, and c are fixed official test
+images shared by all three models: an aligned waterbird, a waterbird on land,
+and a landbird on water. GradCAM always targets the true bird class.
+`gradcam_samples.json` stores their test indices. `sample_a.png`,
+`sample_b.png`, and `sample_c.png` show the original model inputs.
+`data/` contains generated composites, per-condition manifests, and
+`group_counts.json` with the realized
+correlation for each bird label.
+
+Run the offline checks with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
