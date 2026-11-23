@@ -24,6 +24,8 @@ from torchvision.models import vgg11
 
 from waterbirds_data import CORRELATIONS, correlation_name, prepare_synthetic_data
 
+FIXED_LR = 0.01
+
 
 class WaterbirdsImages(Dataset):
     """Read generated file rows or Hugging Face Waterbirds rows."""
@@ -80,12 +82,12 @@ class VGG11BirdClassifier(nn.Module):
 
 
 class Trainer:
-    def __init__(self, model: nn.Module, device: torch.device, epochs: int):
+    def __init__(self, model: nn.Module, device: torch.device):
         self.model = model
         self.device = device
-        self.optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=epochs, eta_min=1e-5)
+        self.optimizer = torch.optim.SGD(
+            model.parameters(), lr=FIXED_LR, momentum=0.9, weight_decay=1e-4
+        )
         self.criterion = nn.CrossEntropyLoss()
 
     def train_epoch(self, loader: DataLoader) -> dict[str, float]:
@@ -102,7 +104,6 @@ class Trainer:
             self.optimizer.step()
             total_loss += loss.item() * len(labels)
             sample_count += len(labels)
-        self.scheduler.step()
         return {"train_loss": total_loss / sample_count, "learning_rate": learning_rate}
 
 
@@ -302,7 +303,7 @@ def _seed_everything(seed: int) -> None:
 
 def _save_state(path: Path, epoch: int, model: nn.Module, trainer: Trainer) -> None:
     state = {"epoch": epoch, "model": model.state_dict(),
-             "optimizer": trainer.optimizer.state_dict(), "scheduler": trainer.scheduler.state_dict(),
+             "optimizer": trainer.optimizer.state_dict(),
              "python_rng": random.getstate(), "numpy_rng": np.random.get_state(),
              "torch_rng": torch.get_rng_state()}
     if torch.cuda.is_available():
@@ -316,7 +317,6 @@ def _load_state(path: Path, model: nn.Module, trainer: Trainer) -> int:
     state = torch.load(path, map_location="cpu", weights_only=False)
     model.load_state_dict(state["model"])
     trainer.optimizer.load_state_dict(state["optimizer"])
-    trainer.scheduler.load_state_dict(state["scheduler"])
     random.setstate(state["python_rng"])
     np.random.set_state(state["numpy_rng"])
     torch.set_rng_state(state["torch_rng"])
@@ -339,7 +339,9 @@ def run(args: argparse.Namespace) -> None:
     settings = {"epochs": args.epochs, "batch_size": args.batch_size,
                 "num_workers": args.num_workers, "seed": args.seed,
                 "device": str(device), "model": "vgg11", "weights": None,
-                "test_dataset": "grodino/waterbirds:test"}
+                "test_dataset": "grodino/waterbirds:test",
+                "optimizer": "SGD", "learning_rate": FIXED_LR,
+                "momentum": 0.9, "weight_decay": 1e-4, "lr_scheduler": None}
     settings_path = output_dir / "settings.json"
     if settings_path.exists():
         if json.loads(settings_path.read_text(encoding="utf-8")) != settings:
@@ -383,7 +385,7 @@ def run(args: argparse.Namespace) -> None:
         validation_loader = loader(validation)
         _seed_everything(args.seed)
         model = VGG11BirdClassifier().to(device)
-        trainer = Trainer(model, device, args.epochs)
+        trainer = Trainer(model, device)
         visualizer = GradCAMVisualizer(model, test, sample_indices, device, condition_dir / "cam")
         latest_path = condition_dir / "latest.pt"
         start_epoch = _load_state(latest_path, model, trainer) if args.resume and latest_path.exists() else 0

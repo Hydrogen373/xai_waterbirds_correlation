@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import json
 import sys
 import tempfile
 import types
@@ -122,9 +123,14 @@ class ExperimentTests(unittest.TestCase):
         images = torch.randn(4, 3, 1, 1)
         labels = torch.tensor([0, 1, 0, 1])
         loader = DataLoader(TensorDataset(images, labels, labels), batch_size=2)
-        metrics = Trainer(model, torch.device("cpu"), epochs=2).train_epoch(loader)
+        trainer = Trainer(model, torch.device("cpu"))
+        metrics = trainer.train_epoch(loader)
+        next_metrics = trainer.train_epoch(loader)
         self.assertTrue(np.isfinite(metrics["train_loss"]))
         self.assertFalse(torch.equal(before, model[1].weight))
+        self.assertEqual(metrics["learning_rate"], 0.01)
+        self.assertEqual(next_metrics["learning_rate"], 0.01)
+        self.assertEqual(trainer.optimizer.param_groups[0]["lr"], 0.01)
 
     def test_gradcam_grid_has_epoch_rows_and_nine_columns(self):
         image = Image.new("RGB", (32, 32), (128, 128, 128))
@@ -180,7 +186,13 @@ class ExperimentTests(unittest.TestCase):
                 args.resume = True
                 run(args)
             with (output / "epoch_metrics.csv").open(newline="", encoding="utf-8") as file:
-                self.assertEqual(len(list(csv.DictReader(file))), 3)
+                rows = list(csv.DictReader(file))
+            self.assertEqual(len(rows), 3)
+            self.assertTrue(all("train_accuracy" not in row for row in rows))
+            self.assertTrue(all(float(row["learning_rate"]) == 0.01 for row in rows))
+            settings = json.loads((output / "settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(settings["learning_rate"], 0.01)
+            self.assertIsNone(settings["lr_scheduler"])
             self.assertTrue((output / "epoch_curves.png").is_file())
             self.assertTrue((output / "gradcam_grid.png").is_file())
             self.assertTrue(all((output / correlation_name(c) / "final.pt").is_file()

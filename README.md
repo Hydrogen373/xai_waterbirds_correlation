@@ -20,7 +20,10 @@ python experiment.py --cub-root C:\path\to\CUB_200_2011 --places-root C:\path\to
 
 `--epochs` defaults to 50, `--batch-size` to 32, and `--seed` to 42. CUDA is
 selected automatically when available. Use `--resume` with the same settings
-and output directory after an interrupted run. The complete VGG11 is large;
+and output directory after an interrupted run. Training uses SGD with a fixed
+learning rate of `0.01`, momentum `0.9`, and weight decay `1e-4`; no learning
+rate scheduler is used. Runs made with the earlier cosine schedule require a
+new output directory. The complete VGG11 is large;
 reduce `--batch-size` if GPU memory is insufficient. The script downloads the
 official `grodino/waterbirds` test split through Hugging Face Datasets.
 
